@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: maqam-b-preview
+    runtime: static
+    buildCommand: unzip -o Maqam-Web-Hosting.zip -d public
+    staticPublishPath: public
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
