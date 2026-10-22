@@ -11,7 +11,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Noto+Kufi+Arabic:wght@400;500;600;700&family=Amiri:wght@400;700&display=swap" rel="stylesheet">
     
     <!-- Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/assets/vendor/tailwind.3.4.17.176e894661aa.js" integrity="sha384-igm5BeiBt36UU4gqwWS7imYmelpTsZlQ45FZf+XBn9MuJbn4nQr7yx1yFydocC/K" crossorigin="anonymous"></script>
     <script>
         tailwind.config = {
             darkMode: 'class',
@@ -53,9 +53,9 @@
     </script>
 
     <!-- React 18 & Babel -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js" integrity="sha384-tMH8h3BGESGckSAVGZ82T9n90ztNXxvdwvdM6UoR56cYcf+0iGXBliJ29D+wZ/x8" crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js" integrity="sha384-bm7MnzvK++ykSwVJ2tynSE5TRdN+xL418osEVF2DE/L/gfWHj91J2Sphe582B1Bh" crossorigin="anonymous"></script>
+    <script src="https://unpkg.com/@babel/standalone@7.28.5/babel.min.js" integrity="sha384-mP9sW+eK08VvAmlxEkn9Kn6egvKFtnFEfW7/u9feUWAIoTvnYAzT4NwsskP+uWUd" crossorigin="anonymous"></script>
 
     <style>
         body { font-family: 'Cairo', sans-serif; overflow-x: hidden; background-color: #080914; color: #f3f4f6; }
@@ -391,7 +391,7 @@
         [data-ui-owner="LiveTranslationModal"] {--background:#061719;--surface-1:#102b2e;--surface-2:#173539;--surface-3:#1c3d40;--border:#305054;--text-1:#ecf2eb;--text-2:#afc2bd;--text-3:#94ada7;--accent:#d6b571;--accent-ink:#14292a;padding:0!important;background:#061719!important;}
         [data-ui-owner="LiveTranslationModal"]>div {max-height:none;border-radius:0!important;}
     </style>
-    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked@17.0.5/lib/marked.umd.js" integrity="sha384-xitqJLqVApqEvkw/MVAOkioswwrPtXzz+I0mHqD0W2vQkcOVb3AEUOSxFsuJ8EgM" crossorigin="anonymous"></script>
 </head>
 <body class="selection:bg-maqam-gold selection:text-black">
     <div id="root"></div>
@@ -3711,6 +3711,130 @@
         // 7. منصة الزوار التفاعلية الشاملة (Visitor Dashboard)
         // معززة بنموذج معاجم الذكي (Dify AI Agent) وبوب أب عائم في الزاوية
         // =======================================================
+        // MAQAM_SAFE_MARKDOWN_START
+        // Untrusted answers become allowlisted React elements. HTML is always text.
+        const markdownText = value => String(value == null ? '' : value).replace(/&(#x[0-9a-f]+|#\d+|amp|lt|gt|quot|apos);/gi, (whole, entity) => {
+            const named = {amp:'&', lt:'<', gt:'>', quot:'"', apos:"'"};
+            if (entity[0] !== '#') return named[entity.toLowerCase()] || whole;
+            const number = entity[1].toLowerCase() === 'x' ? parseInt(entity.slice(2), 16) : parseInt(entity.slice(1), 10);
+            return number > 0 && number <= 0x10ffff && !(number >= 0xd800 && number <= 0xdfff) ? String.fromCodePoint(number) : '\uFFFD';
+        });
+        const safeMarkdownUrl = href => {
+            if (typeof href !== 'string') return null;
+            const value = markdownText(href).trim();
+            if (!value || /[\u0000-\u0020\u007f-\u009f\\]/.test(value)) return null;
+            if (/^https?:\/\//i.test(value)) {
+                try {
+                    const url = new URL(value);
+                    return ['https:', 'http:'].includes(url.protocol) && url.hostname && !url.username && !url.password ? value : null;
+                } catch (error) { return null; }
+            }
+            if (/^(?:\/(?!\/)|\.{1,2}\/|#|\?)/.test(value)) return value;
+            return /^[A-Za-z0-9._~-]+(?:\/[A-Za-z0-9._~%/-]*)?(?:[?#][^\s\\]*)?$/.test(value) ? value : null;
+        };
+        const renderMarkdownTokens = (tokens, depth = 0) => {
+            if (!Array.isArray(tokens) || depth > 24) return null;
+            return tokens.map((token, key) => {
+                if (!token || typeof token !== 'object') return '';
+                const children = () => renderMarkdownTokens(token.tokens, depth + 1);
+                const element = (type, content, extra = {}) => React.createElement(type, {key, ...extra}, content);
+                switch (token.type) {
+                    case 'space': case 'def': return null;
+                    case 'heading': return element('h' + Math.max(1, Math.min(6, Number(token.depth) || 1)), children());
+                    case 'paragraph': return element('p', children());
+                    case 'text': return Array.isArray(token.tokens) ? children() : markdownText(token.text);
+                    case 'escape': return markdownText(token.text);
+                    case 'strong': return element('strong', children());
+                    case 'em': return element('em', children());
+                    case 'del': return element('del', children());
+                    case 'codespan': return element('code', String(token.text || ''));
+                    case 'code': return element('pre', React.createElement('code', null, String(token.text || '')));
+                    case 'blockquote': return element('blockquote', children());
+                    case 'br': return element('br');
+                    case 'hr': return element('hr');
+                    case 'link': {
+                        const href = safeMarkdownUrl(token.href);
+                        return href ? element('a', children(), {href, target:'_blank', rel:'noopener noreferrer'}) : element('span', children());
+                    }
+                    case 'image': return markdownText(token.text || '');
+                    case 'html': return String(token.text || token.raw || '');
+                    case 'list': {
+                        const items = Array.isArray(token.items) ? token.items : [];
+                        const list = items.map((item, index) => React.createElement('li', {key:index}, renderMarkdownTokens(item.tokens, depth + 1)));
+                        const start = Number.isInteger(token.start) && token.start > 0 && token.start <= 100000 ? token.start : 1;
+                        return element(token.ordered ? 'ol' : 'ul', list, token.ordered ? {start} : {});
+                    }
+                    case 'table': {
+                        const cells = (row, tag) => (Array.isArray(row) ? row : []).map((cell, index) => React.createElement(tag, {key:index}, renderMarkdownTokens(cell.tokens, depth + 1)));
+                        const rows = (Array.isArray(token.rows) ? token.rows : []).map((row, index) => React.createElement('tr', {key:index}, cells(row, 'td')));
+                        return element('table', [React.createElement('thead', {key:'head'}, React.createElement('tr', null, cells(token.header, 'th'))), React.createElement('tbody', {key:'body'}, rows)]);
+                    }
+                    default: return String(token.text || token.raw || '');
+                }
+            });
+        };
+        const renderSafeMarkdown = rawText => {
+            const text = String(rawText == null ? '' : rawText);
+            if (!window.marked || typeof window.marked.lexer !== 'function') return text;
+            try { return renderMarkdownTokens(window.marked.lexer(text)); }
+            catch (error) { return text; }
+        };
+        // MAQAM_SAFE_MARKDOWN_END
+
+        // MAQAM_ANONYMOUS_ID_START
+        let maqamAnonymousId = '';
+        const maqamConversationIds = new Map();
+        const isMaqamUuid = value => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(value);
+        const createAnonymousUuid = () => {
+            if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') return crypto.randomUUID();
+            if (typeof crypto !== 'undefined' && typeof crypto.getRandomValues === 'function') {
+                const bytes = crypto.getRandomValues(new Uint8Array(16));
+                bytes[6] = (bytes[6] & 15) | 64;
+                bytes[8] = (bytes[8] & 63) | 128;
+                const hex = Array.from(bytes, byte => byte.toString(16).padStart(2, '0')).join('');
+                return `${hex.slice(0,8)}-${hex.slice(8,12)}-${hex.slice(12,16)}-${hex.slice(16,20)}-${hex.slice(20)}`;
+            }
+            throw new Error('Secure anonymous identity is unavailable.');
+        };
+        const getAnonymousUserId = role => {
+            if (role !== 'visitor' && role !== 'student') throw new Error('Unknown anonymous identity namespace.');
+            if (!maqamAnonymousId) {
+                let stored = '';
+                try { stored = localStorage.getItem('maqam_uid') || ''; } catch (error) {}
+                maqamAnonymousId = isMaqamUuid(stored) ? stored : createAnonymousUuid();
+                if (!isMaqamUuid(maqamAnonymousId)) throw new Error('Anonymous identity could not be created.');
+                try { localStorage.setItem('maqam_uid', maqamAnonymousId); } catch (error) {}
+                // Legacy shared-guest context cannot be assigned to this browser identity.
+                try { localStorage.removeItem('maqam_dify_conv_id'); } catch (error) {}
+            }
+            return `${role}_${maqamAnonymousId}`;
+        };
+        const readConversationId = role => {
+            let key = '';
+            try {
+                key = 'maqam_dify_conv_id:' + getAnonymousUserId(role);
+                if (maqamConversationIds.has(key)) return maqamConversationIds.get(key);
+                const stored = localStorage.getItem(key);
+                if (isMaqamUuid(stored)) {
+                    maqamConversationIds.set(key, stored);
+                    return stored;
+                }
+            } catch (error) {}
+            return maqamConversationIds.get(key) || '';
+        };
+        const setStoredConversationId = (role, value) => {
+            try {
+                const key = 'maqam_dify_conv_id:' + getAnonymousUserId(role);
+                const id = isMaqamUuid(value) ? value : '';
+                maqamConversationIds.set(key, id);
+                try {
+                    if (id) localStorage.setItem(key, id);
+                    else localStorage.removeItem(key);
+                } catch (error) {}
+            } catch (error) {}
+        };
+        // MAQAM_ANONYMOUS_ID_END
+
         const VisitorDashboard = ({ onNavigate, onOpenLanguage, onOpenAccessibility, currentLanguage, onMinimizeAudio }) => {
             const [mapModalData, setMapModalData] = useState({ isOpen: false, location: '', sheikh: '' });
             const [activeTab, setActiveTab] = useState('home');
@@ -3732,9 +3856,7 @@
             // ===================================================
             const [isFloatingChatOpen, setIsFloatingChatOpen] = useState(false);
             const [isFloatingMinimized, setIsFloatingMinimized] = useState(false);
-            const [currentConversationId, setCurrentConversationId] = useState(() => {
-                try { return localStorage.getItem('maqam_dify_conv_id') || ''; } catch(e) { return ''; }
-            });
+            const [currentConversationId, setCurrentConversationId] = useState(() => readConversationId('visitor'));
             const [isBotThinking, setIsBotThinking] = useState(false);
             const [chatInput, setChatInput] = useState('');
             const [feedbackToast, setFeedbackToast] = useState('');
@@ -3888,7 +4010,7 @@
                 }
 
                 setCurrentConversationId('');
-                try { localStorage.removeItem('maqam_dify_conv_id'); } catch(e) {}
+                setStoredConversationId('visitor', '');
                 setChatMessages([
                     { 
                         id: 'm-welcome-' + Date.now(),
@@ -3942,7 +4064,7 @@
                         body: JSON.stringify({
                             query: query,
                             conversation_id: currentConversationId || '',
-                            user: 'visitor_' + (localStorage.getItem('maqam_uid') || 'guest_101')
+                            user: getAnonymousUserId('visitor')
                         })
                     });
 
@@ -3952,7 +4074,7 @@
                         // نجح استلام الرد الفعلي من Dify Agent
                         if (data.conversation_id) {
                             setCurrentConversationId(data.conversation_id);
-                            try { localStorage.setItem('maqam_dify_conv_id', data.conversation_id); } catch(e) {}
+                            setStoredConversationId('visitor', data.conversation_id);
                         }
 
                         setChatMessages(prev => [
@@ -4042,14 +4164,7 @@
             // دالة تصيير الماركداون بشكل آمن
             const renderFormattedText = (rawText) => {
                 if (!rawText) return null;
-                if (window.marked) {
-                    try {
-                        const html = window.marked.parse(rawText);
-                        return <div data-ui-owner="VisitorDashboard" className="prose prose-invert max-w-none text-sm leading-relaxed mq-owner" dangerouslySetInnerHTML={{ __html: html }} />;
-                    } catch(e) {}
-                }
-                // بديل داخلي
-                return <p data-ui-owner="VisitorDashboard" className="whitespace-pre-line leading-relaxed text-sm mq-owner">{rawText}</p>;
+                return <div data-ui-owner="VisitorDashboard" className="prose prose-invert max-w-none text-sm leading-relaxed mq-owner">{renderSafeMarkdown(rawText)}</div>;
             };
 
             return (
@@ -5957,7 +6072,7 @@
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                                 query: text.trim(),
-                                user: 'student_maqam',
+                                user: getAnonymousUserId('student'),
                                 conversation_id: difyConversationId || ''
                             })
                         });
@@ -5969,32 +6084,7 @@
                             }
                         }
                     } catch (e) {
-                        console.warn('Backend proxy /api/chat unreachable, attempting direct Dify API call...');
-                    }
-
-                    // المحاولة الثانية: استدعاء مباشر لـ Dify API
-                    if (!finalAnswer) {
-                        const directRes = await fetch('https://api.dify.ai/v1/chat-messages', {
-                            method: 'POST',
-                            headers: {
-                                'Content-Type': 'application/json',
-                                'Authorization': 'Bearer '
-                            },
-                            body: JSON.stringify({
-                                inputs: {},
-                                query: text.trim(),
-                                response_mode: 'blocking',
-                                user: 'student_maqam',
-                                conversation_id: difyConversationId || ''
-                            })
-                        });
-                        if (directRes.ok) {
-                            const directData = await directRes.json();
-                            if (directData && directData.answer) {
-                                finalAnswer = directData.answer;
-                                if (directData.conversation_id) newConvId = directData.conversation_id;
-                            }
-                        }
+                        console.warn('Chat request could not reach the server.');
                     }
 
                     if (newConvId) setDifyConversationId(newConvId);
@@ -9660,6 +9750,7 @@
             }, 'google_translate_element');
         }
     </script>
+    <!-- Google Translate is a vendor-controlled dynamic widget with no immutable version/SRI endpoint; it is the documented external integration exception. -->
     <script src="https://translate.google.com/translate_a/element.js?cb=googleTranslateElementInit"></script>
     
 </body>
