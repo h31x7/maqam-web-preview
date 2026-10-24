@@ -1,7 +1,7 @@
 {
   "main": {
     "name": "Maqam-Source-20261020.zip",
-    "sha256": "e871c2938d043b4c90faa4c13ad567ebbccb79fde1d3d2fb306618ed7466e107"
+    "sha256": "03be6bbdd86a29537defa3309d601db658e4e8f6ace2b18c0f1db73b4df449a1"
   },
   "booksSha256": "8af60ff20a7658c5be058ab96a341ad4dfcd8e8e9d578168caf3c6b7eaa65dca",
   "parts": [
@@ -61,6 +61,10 @@
     "docs/round3-language-browser-results.json",
     "docs/round3-map.md",
     "docs/round3-ocr-report.md",
+    "docs/round3-progress.md",
+    "docs/round3-release-review.md",
+    "docs/round3-release.md",
+    "docs/round3-screenshot-dimensions.json",
     "docs/round3-translation-server-review.md",
     "launch_local.py",
     "maqamooo.html",
