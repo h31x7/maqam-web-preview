@@ -16,7 +16,6 @@ import mimetypes
 import os
 from pathlib import Path
 import re
-import shutil
 import socket
 import threading
 import time
@@ -44,6 +43,41 @@ PUBLIC_ASSET_EXTENSIONS = frozenset({
     ".gif", ".ico", ".woff", ".woff2", ".ttf", ".mp4", ".webm", ".mp3",
     ".ogg", ".wav",
 })
+# New corpus assets are a filename manifest, never an extension/prefix grant.
+ROUND3_PUBLIC_PATHS = frozenset({
+    "/data/languages.json", "/data/lectures.json", "/data/quizzes.json",
+    "/data/summaries.json", "/data/haram-schedule.json", "/data/books.json",
+    "/data/subtitles-unverified.json",
+    "/assets/brand/maqam.png", "/assets/brand/favicon-32.png",
+    "/assets/brand/favicon-192.png", "/assets/brand/touch-icon.png",
+    "/assets/brand/apple-touch-icon.png",
+    *{f"/assets/books/book-{number}.pdf" for number in range(1, 8)},
+    *{f"/assets/book-covers/book-{number}.png" for number in range(1, 8)},
+    *{f"/data/book-indexes/book-{number}.json" for number in range(1, 8)},
+})
+ROUND3_RESERVED_PREFIXES = ("/assets/books/", "/assets/book-covers/", "/assets/brand/")
+
+
+def _pdf_range(values, size):
+    """Return one inclusive byte interval; reject ambiguous/unbounded input."""
+    if len(values) != 1 or len(values[0]) > 128:
+        raise ValueError("Invalid range")
+    match = re.fullmatch(r"bytes=([0-9]{0,20})-([0-9]{0,20})", values[0])
+    if not match or not any(match.groups()) or size == 0:
+        raise ValueError("Invalid range")
+    first, last = match.groups()
+    if not first:
+        suffix = int(last)
+        if suffix == 0:
+            raise ValueError("Invalid range")
+        return max(0, size - suffix), size - 1
+    start = int(first)
+    end = min(int(last), size - 1) if last else size - 1
+    if start >= size or end < start:
+        raise ValueError("Invalid range")
+    return start, end
+
+
 HASHED_ASSET_NAME = re.compile(r"\.[0-9a-fA-F]{8,64}\.")
 
 # Temporary exceptions for the existing CDN/Babel build; tighten after a verified
@@ -51,13 +85,13 @@ HASHED_ASSET_NAME = re.compile(r"\.[0-9a-fA-F]{8,64}\.")
 CONTENT_SECURITY_POLICY = "; ".join([
     "default-src 'self'", "base-uri 'self'", "object-src 'none'",
     "frame-ancestors 'none'", "form-action 'self'",
-    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://unpkg.com https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://translate.google.com https://translate.googleapis.com https://www.gstatic.com",
+    "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://unpkg.com https://cdn.jsdelivr.net https://cdn.tailwindcss.com https://translate.google.com https://translate.googleapis.com https://www.gstatic.com https://www.youtube.com",
     "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://translate.googleapis.com https://www.gstatic.com",
     "font-src 'self' https://fonts.gstatic.com data:",
     "img-src 'self' data: https://i.ytimg.com https://img.youtube.com https://translate.google.com https://translate.googleapis.com https://www.google.com https://www.gstatic.com https://*.googleusercontent.com",
     "connect-src 'self' https://translate.google.com https://translate.googleapis.com https://www.youtube.com",
     "frame-src https://www.youtube.com https://www.youtube-nocookie.com https://translate.google.com",
-    "media-src 'self'",
+    "media-src 'self' blob:",
 ])
 SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
@@ -232,6 +266,57 @@ class RateLimiter:
         return True, 0
 
 
+class TranslationState:
+    """Bounded process-local cache, throttles and provider cooldown."""
+    def __init__(self):
+        self.lock = threading.Lock()
+        self.cache = OrderedDict()
+        self.ips = OrderedDict()
+        self.global_times = deque()
+        self.cooldown = 0
+
+    def admit(self, identity):
+        now = time.monotonic()
+        with self.lock:
+            if self.cooldown > now:
+                return False, max(1, math.ceil(self.cooldown - now))
+            times = self.ips.pop(identity, deque())
+            for queue in (times, self.global_times):
+                while queue and queue[0] <= now - 60:
+                    queue.popleft()
+            self.ips[identity] = times
+            while len(self.ips) > 4096:
+                self.ips.popitem(last=False)
+            if len(times) >= 60 or len(self.global_times) >= 60:
+                return False, 60
+            times.append(now)
+            self.global_times.append(now)
+            return True, 0
+
+    def cached(self, key):
+        with self.lock:
+            entry = self.cache.get(key)
+            if entry and entry[0] > time.monotonic():
+                self.cache.move_to_end(key)
+                return entry[1]
+            self.cache.pop(key, None)
+            return None
+
+    def save(self, key, value):
+        with self.lock:
+            self.cache[key] = (time.monotonic() + 3600, value)
+            while len(self.cache) > 256:
+                self.cache.popitem(last=False)
+
+
+def _translation_targets():
+    # Repository-owned canonical metadata; never a request-controlled pathname.
+    rows = _parse_json((BASE_DIR / "data" / "languages.json").read_bytes())
+    codes = [row["code"] for row in rows if isinstance(row, dict) and isinstance(row.get("code"), str)]
+    blocked = {"ber", "bat", "rhg", "bal", "bci", "tum", "tiv", "dyo", "lmo", "mad", "jw", "iw", "gd"}
+    return frozenset(code for code in codes if code not in blocked and re.fullmatch(r"[a-z]{2,3}(?:-[A-Za-z]{2,4})?", code))
+
+
 class MaqamHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     block_on_close = False
@@ -314,6 +399,7 @@ class MaqamProxyHandler(BaseHTTPRequestHandler):
             411: "تعذر قبول الطلب. يرجى المحاولة مجدداً.",
             413: "حجم الطلب أكبر من المسموح. يرجى اختصار النص.",
             415: "صيغة الطلب غير مدعومة.",
+            416: "نطاق الملف المطلوب غير صالح.",
             429: "تم إرسال طلبات كثيرة. يرجى الانتظار قليلاً والمحاولة مجدداً.",
             500: "تعذر إتمام الطلب الآن. يرجى المحاولة لاحقاً.",
             502: "تعذر الحصول على إجابة الآن. يرجى المحاولة مجدداً.",
@@ -367,6 +453,9 @@ class MaqamProxyHandler(BaseHTTPRequestHandler):
             return None
         if any(ord(char) < 32 or ord(char) == 127 for char in path) or any(char in path for char in "\\:%?#"):
             return None
+        # Path must retain the same segments on POSIX and Windows filesystems.
+        if "//" in path or any(part.endswith((".", " ")) for part in path.split("/") if part):
+            return None
         if any(part.startswith(".") for part in path.split("/") if part):
             return None
         return path
@@ -386,17 +475,25 @@ class MaqamProxyHandler(BaseHTTPRequestHandler):
         root = self.server.base_dir
         if path in {"/", "/" + APP_FILE}:
             candidate, asset = root / APP_FILE, False
-        elif path and path.startswith("/assets/") and Path(path).suffix.lower() in PUBLIC_ASSET_EXTENSIONS:
+        elif path in ROUND3_PUBLIC_PATHS:
+            candidate, asset = root / path.lstrip("/"), True
+        elif (path and path.startswith("/assets/")
+              and not path.lower().startswith(ROUND3_RESERVED_PREFIXES)
+              and Path(path).suffix.lower() in PUBLIC_ASSET_EXTENSIONS):
             candidate, asset = root / path.lstrip("/"), True
         else:
             self._error(404)
             return
         try:
+            # Reject symlink components even when their destination remains inside root.
+            if any(part.is_symlink() for part in (candidate, *candidate.parents) if part != root and part.is_relative_to(root)):
+                self._error(404)
+                return
             resolved = candidate.resolve(strict=True)
             if not resolved.is_relative_to(root) or not resolved.is_file():
                 self._error(404)
                 return
-            if asset and (not resolved.is_relative_to(root / "assets") or resolved.suffix.lower() not in PUBLIC_ASSET_EXTENSIONS):
+            if asset and path not in ROUND3_PUBLIC_PATHS and (not resolved.is_relative_to(root / "assets") or resolved.suffix.lower() not in PUBLIC_ASSET_EXTENSIONS):
                 self._error(404)
                 return
             if not asset and resolved.name != APP_FILE:
@@ -409,15 +506,36 @@ class MaqamProxyHandler(BaseHTTPRequestHandler):
         try:
             with source:
                 self.cache_policy = ("public, max-age=31536000, immutable" if HASHED_ASSET_NAME.search(resolved.name) else "public, max-age=3600, must-revalidate") if asset else "no-cache"
-                self.send_response(200)
+                size = os.fstat(source.fileno()).st_size
+                is_pdf = path in ROUND3_PUBLIC_PATHS and resolved.suffix == ".pdf"
+                ranges = self.headers.get_all("Range", []) if is_pdf else []
+                start, end = 0, size - 1
+                if ranges:
+                    try:
+                        start, end = _pdf_range(ranges, size)
+                    except ValueError:
+                        self._error(416, extra_headers={"Content-Range": f"bytes */{size}", "Accept-Ranges": "bytes"})
+                        return
+                self.send_response(206 if ranges else 200)
+                if is_pdf:
+                    self.send_header("Accept-Ranges", "bytes")
+                if ranges:
+                    self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
                 content_type = mimetypes.guess_type(resolved.name)[0] or "application/octet-stream"
                 if content_type.startswith("text/") or content_type in {"application/javascript", "application/json"}:
                     content_type += "; charset=utf-8"
                 self.send_header("Content-Type", content_type)
-                self.send_header("Content-Length", str(os.fstat(source.fileno()).st_size))
+                self.send_header("Content-Length", str(end - start + 1))
                 self.end_headers()
                 if not head:
-                    shutil.copyfileobj(source, self.wfile, length=65_536)
+                    source.seek(start)
+                    remaining = end - start + 1
+                    while remaining:
+                        block = source.read(min(65_536, remaining))
+                        if not block:
+                            break
+                        self.wfile.write(block)
+                        remaining -= len(block)
         except (BrokenPipeError, ConnectionResetError, socket.timeout):
             pass
 
@@ -430,7 +548,7 @@ class MaqamProxyHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         if not self._begin():
             return
-        if self._path() != "/api/chat":
+        if self._path() not in {"/api/chat", "/api/translate"}:
             self._error(404)
             return
         if self.headers.get("Access-Control-Request-Method", "POST").upper() != "POST":
@@ -450,10 +568,12 @@ class MaqamProxyHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._begin():
             return
-        if self._path() != "/api/chat":
+        if self._path() not in {"/api/chat", "/api/translate"}:
             self._error(404)
             return
-        admitted, retry_after = self.server.rate_limiter.admit(self.client_address[0])
+        translation = self._path() == "/api/translate"
+        limiter = self.server.translation_state if translation else self.server.rate_limiter
+        admitted, retry_after = limiter.admit(self.client_address[0])
         if not admitted:
             self._error(429, extra_headers={"Retry-After": str(retry_after)})
             return
@@ -494,6 +614,15 @@ class MaqamProxyHandler(BaseHTTPRequestHandler):
             if len(body) != length:
                 raise ValueError("Incomplete body")
             data = _parse_json(body)
+            if translation:
+                if (not isinstance(data, dict) or set(data) != {"text", "target", "source"}
+                        or data["source"] != "ar" or not isinstance(data["target"], str)
+                        or data["target"] not in self.server.translation_targets
+                        or not _valid_text(data["text"], 4000)
+                        or any((ord(char) < 32 and char not in "\n\t") or ord(char) == 127 for char in data["text"])):
+                    raise ValueError("Invalid translation")
+                self.handle_translation(data["text"], data["target"])
+                return
             if not isinstance(data, dict) or not set(data).issubset({"query", "user", "conversation_id", "inputs"}):
                 raise ValueError("Invalid payload")
             query, identity, conversation = data.get("query"), data.get("user"), data.get("conversation_id", "")
@@ -507,6 +636,58 @@ class MaqamProxyHandler(BaseHTTPRequestHandler):
             self._error(400)
             return
         self.handle_dify_chat(query.strip(), identity, conversation, inputs)
+
+    def handle_translation(self, text, target):
+        state = self.server.translation_state
+        key = (text, target)
+        cached = state.cached(key)
+        if cached is not None:
+            self._json(200, {"text": cached, "target": target})
+            return
+        query = urllib.parse.urlencode({"client": "gtx", "sl": "ar", "tl": target, "dt": "t", "q": text})
+        request = urllib.request.Request("https://translate.googleapis.com/translate_a/single?" + query, headers={"Accept": "application/json"})
+        opener = urllib.request.build_opener(RejectProviderRedirects())
+        try:
+            with opener.open(request, timeout=8) as response:
+                if response.getcode() != 200:
+                    raise ValueError("Provider status")
+                deadline = time.monotonic() + 8
+                chunks, size = [], 0
+                while size <= 65536:
+                    if time.monotonic() >= deadline:
+                        raise TimeoutError("Provider deadline")
+                    chunk = response.read1(min(8192, 65537 - size))
+                    if not chunk:
+                        break
+                    chunks.append(chunk)
+                    size += len(chunk)
+                raw = b"".join(chunks)
+                if len(raw) > 65536:
+                    raise ValueError("Provider size")
+                result = _parse_json(raw)
+            if not isinstance(result, list) or not result or not isinstance(result[0], list) or not 1 <= len(result[0]) <= 4000:
+                raise ValueError("Provider format")
+            parts = []
+            for row in result[0]:
+                if not isinstance(row, list) or not row or not _valid_text(row[0], 16000):
+                    raise ValueError("Provider translation")
+                parts.append(row[0])
+            translated = "".join(parts)
+            if not _valid_text(translated, 16000):
+                raise ValueError("Provider translation")
+            state.save(key, translated)
+            self._json(200, {"text": translated, "target": target})
+        except urllib.error.HTTPError as error:
+            status = error.code
+            error.close()
+            if status == 429:
+                with state.lock:
+                    state.cooldown = time.monotonic() + 60
+                self._error(429, extra_headers={"Retry-After": "60"})
+            else:
+                self._error(502)
+        except (urllib.error.URLError, ValueError, TypeError, UnicodeError, OSError, RecursionError):
+            self._error(502)
 
     def handle_dify_chat(self, query, identity, conversation, inputs):
         key = DIFY_API_KEY
@@ -566,6 +747,8 @@ def create_server(host, port, base_dir=None):
     if public_origin:
         server.allowed_authorities.add(urllib.parse.urlsplit(public_origin).netloc)
     server.rate_limiter = RateLimiter()
+    server.translation_state = TranslationState()
+    server.translation_targets = _translation_targets()
     server.worker_slots = threading.BoundedSemaphore(MAX_REQUEST_WORKERS)
     return server
 

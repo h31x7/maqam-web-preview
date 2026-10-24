@@ -1,0 +1,78 @@
+{
+  "main": {
+    "name": "Maqam-Source-20261020.zip",
+    "sha256": "e871c2938d043b4c90faa4c13ad567ebbccb79fde1d3d2fb306618ed7466e107"
+  },
+  "booksSha256": "8af60ff20a7658c5be058ab96a341ad4dfcd8e8e9d578168caf3c6b7eaa65dca",
+  "parts": [
+    {
+      "name": "Maqam-Books.part001",
+      "sha256": "688a84c616e76c60462cdcc5cc8deaacd6125443cddb7abbe16c9d691a9bff22"
+    },
+    {
+      "name": "Maqam-Books.part002",
+      "sha256": "78d3b744963a526f774f5b64a3dc91c5b66fa40774e0eab4c918c9f062bcf647"
+    },
+    {
+      "name": "Maqam-Books.part003",
+      "sha256": "267d28dcf74cde699f8b4622a1f185c8c584bac4e0342d69305150202b852fa3"
+    },
+    {
+      "name": "Maqam-Books.part004",
+      "sha256": "58dc27e197b6510a3e8886b9cc624cf3c120cffb455ce60fb3c7b8007bc91102"
+    }
+  ],
+  "mainFiles": [
+    "DESIGN.md",
+    "Start-Maqam.cmd",
+    "UX-CONTRACT.md",
+    "assets/book-covers/book-1.png",
+    "assets/book-covers/book-2.png",
+    "assets/book-covers/book-3.png",
+    "assets/book-covers/book-4.png",
+    "assets/book-covers/book-5.png",
+    "assets/book-covers/book-6.png",
+    "assets/book-covers/book-7.png",
+    "assets/brand/apple-touch-icon.png",
+    "assets/brand/favicon-192.png",
+    "assets/brand/favicon-32.png",
+    "assets/brand/maqam.png",
+    "assets/brand/touch-icon.png",
+    "assets/vendor/tailwind.3.4.17.176e894661aa.js",
+    "data/book-indexes/book-1.json",
+    "data/book-indexes/book-2.json",
+    "data/book-indexes/book-3.json",
+    "data/book-indexes/book-4.json",
+    "data/book-indexes/book-5.json",
+    "data/book-indexes/book-6.json",
+    "data/book-indexes/book-7.json",
+    "data/book-indexes/manifest.json",
+    "data/books.json",
+    "data/haram-schedule.json",
+    "data/languages.json",
+    "data/lectures.json",
+    "data/quizzes.json",
+    "data/subtitles-unverified.json",
+    "data/summaries.json",
+    "docs/FONT-NOTICE.md",
+    "docs/round3-caption-evidence.json",
+    "docs/round3-changelog.md",
+    "docs/round3-final-review.md",
+    "docs/round3-language-browser-results.json",
+    "docs/round3-map.md",
+    "docs/round3-ocr-report.md",
+    "docs/round3-translation-server-review.md",
+    "launch_local.py",
+    "maqamooo.html",
+    "server.py"
+  ],
+  "bookFiles": [
+    "assets/books/book-1.pdf",
+    "assets/books/book-2.pdf",
+    "assets/books/book-3.pdf",
+    "assets/books/book-4.pdf",
+    "assets/books/book-5.pdf",
+    "assets/books/book-6.pdf",
+    "assets/books/book-7.pdf"
+  ]
+}
