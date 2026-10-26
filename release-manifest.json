@@ -1,7 +1,7 @@
 {
   "main": {
     "name": "Maqam-Source-20261020.zip",
-    "sha256": "c32ab66948a5d3f391ed552a0b8860921fc7094dea067b360224a182dffc8b9a"
+    "sha256": "73df7cea64d53f057a13693aee37882e67e8ab61c18cda2b11640b982df9f08a"
   },
   "booksSha256": "8af60ff20a7658c5be058ab96a341ad4dfcd8e8e9d578168caf3c6b7eaa65dca",
   "parts": [
@@ -314,8 +314,14 @@
     "docs/screenshots/round5/edge-translation-playback-desktop.png",
     "docs/startup-performance.md",
     "docs/superpowers/plans/2026-10-25-notes-chat-groq.md",
+    "docs/superpowers/plans/2026-10-26-video-dubbing.md",
+    "docs/video-dubbing-changelog.md",
+    "docs/video-pipeline-map.md",
+    "docs/video-pipeline-review.md",
+    "docs/video-source-probe.md",
     "launch_local.py",
     "maqamooo.html",
+    "prepared-recordings/uJENBxFnDbU.json",
     "requirements.txt",
     "server.py",
     "tests/__init__.py",
@@ -348,6 +354,7 @@
     "tests/round5-media.test.js",
     "tests/round5-notes.test.js",
     "tests/startup-loading.test.js",
+    "tests/test_lecture_source.py",
     "tests/test_round3_static.py",
     "tests/test_round3_translation.py",
     "tests/test_round4_images.py",
@@ -368,6 +375,6 @@
     "assets/books/book-6.pdf",
     "assets/books/book-7.pdf"
   ],
-  "sourceCommit": "d0b2ef277c1e3fc115788dae249aff475e1a189d",
-  "htmlSha256": "17bcdd8c32e1d9fdd3746cf24fbfcacf1902a4426c84669277d47725f59b4b17"
+  "sourceCommit": "472685a873f05135fb651a1565ce09ec1a6b4609",
+  "htmlSha256": "a52ba2ca6c8c5c2395384caccf69ab71283a320855f6f04c13ed9ad34e2820d8"
 }

@@ -1,5 +1,5 @@
-# Maqam — notes, Groq translation and Edge speech
+# Maqam — recording dubbing and dedicated stop control
 
-Canonical source: d0b2ef277c1e3fc115788dae249aff475e1a189d
+Canonical source: 472685a873f05135fb651a1565ce09ec1a6b4609
 
-Run python prepare_release.py, then cd app && python server.py. Archive checksums and pinned runtime requirements are verified. Server-only settings: GROQ_API_KEY, GROQ_TRANSLATE_MODEL=qwen/qwen3.8-27b, TTS_PROVIDER=edge; preserve existing Dify settings. No secrets or original heading font files. Older branches preserved. Limits: app/docs/round5-release-readiness.md.
+Actual registered recording -> Whisper timestamps -> lazy Qwen translation -> Edge speech with dedicated immediate stop. The73m15s first recording is bundled as explicitly unreviewed machine transcript. Other recordings prepare on demand. Archive and book checksums verified by python prepare_release.py. API secrets remain server-only. Validation/limitations: app/docs/video-dubbing-changelog.md.

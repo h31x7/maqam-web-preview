@@ -257,7 +257,8 @@ class RejectProviderRedirects(urllib.request.HTTPRedirectHandler):
 
 
 class RateLimiter:
-    def __init__(self):
+    def __init__(self, count=None):
+        self._count = count
         self._entries = OrderedDict()
         self._lock = threading.Lock()
 
@@ -267,7 +268,7 @@ class RateLimiter:
             timestamps = self._entries.pop(identity, deque())
             while timestamps and timestamps[0] <= now - RATE_LIMIT_WINDOW_SECONDS:
                 timestamps.popleft()
-            if len(timestamps) >= RATE_LIMIT_COUNT:
+            if len(timestamps) >= (self._count if self._count is not None else RATE_LIMIT_COUNT):
                 self._entries[identity] = timestamps
                 return False, max(1, math.ceil(RATE_LIMIT_WINDOW_SECONDS - (now - timestamps[0])))
             timestamps.append(now)
@@ -703,6 +704,27 @@ class MaqamProxyHandler(BaseHTTPRequestHandler):
                 ready = False
             self._json(200 if ready else 503, {"status": "ok" if ready else "unavailable"}, head=head)
             return
+        if path == '/api/lecture-source':
+            if self.headers.get('Sec-Fetch-Site') == 'cross-site':
+                self._error(403)
+                return
+            admitted, retry = self.server.capability_limiter.admit(self.client_address[0])
+            if not admitted:
+                self._error(429, extra_headers={'Retry-After':str(retry)})
+                return
+            try:
+                params = urllib.parse.parse_qs(urllib.parse.urlsplit(self.path).query, strict_parsing=True)
+                if set(params) != {'jobId'} or len(params['jobId']) != 1 or not _uuid_string(params['jobId'][0]):
+                    raise ValueError
+                value = self.server.lecture_sources.snapshot(params['jobId'][0])
+            except ValueError:
+                self._error(400)
+                return
+            if value is None:
+                self._json(404, {'code':'source_job_expired','error':'انتهت صلاحية طلب التجهيز. أعد المحاولة.'})
+                return
+            self._json(200,value,head=head)
+            return
         if path == "/api/capabilities":
             admitted, retry = self.server.capability_limiter.admit(self.client_address[0])
             if not admitted:
@@ -794,7 +816,7 @@ class MaqamProxyHandler(BaseHTTPRequestHandler):
     def do_OPTIONS(self):
         if not self._begin():
             return
-        if self._path() not in {"/api/chat", "/api/translate", "/api/upload", "/api/speech"}:
+        if self._path() not in {"/api/chat", "/api/translate", "/api/upload", "/api/speech", "/api/lecture-source"}:
             self._error(404)
             return
         if self.headers.get("Access-Control-Request-Method", "POST").upper() != "POST":
@@ -814,12 +836,13 @@ class MaqamProxyHandler(BaseHTTPRequestHandler):
     def do_POST(self):
         if not self._begin():
             return
-        if self._path() not in {"/api/chat", "/api/translate", "/api/upload", "/api/speech"}:
+        if self._path() not in {"/api/chat", "/api/translate", "/api/upload", "/api/speech", "/api/lecture-source"}:
             self._error(404)
             return
+        lecture_source = self._path() == "/api/lecture-source"
         speech = self._path() == "/api/speech"
         upload = self._path() == "/api/upload"
-        if (upload or speech) and not self.allowed_origin:
+        if (upload or speech or lecture_source) and not self.allowed_origin:
             self._error(403)
             return
         translation = self._path() == "/api/translate"
@@ -867,6 +890,13 @@ class MaqamProxyHandler(BaseHTTPRequestHandler):
             if len(body) != length:
                 raise ValueError("Incomplete body")
             data = _multipart_upload(body, self.headers.get("Content-Type", "")) if multipart else _parse_json(body)
+            if lecture_source:
+                video = _lecture_video(data, self.server.lecture_sources.registered)
+                try:
+                    self._json(202, self.server.lecture_sources.submit(video))
+                except LectureSourceFailure as failure:
+                    self._json(429, {'code':failure.code,'error':'يجري تجهيز تسجيل آخر. حاول لاحقاً.','retryAfter':failure.retry}, extra_headers={'Retry-After':str(failure.retry)})
+                return
             if upload:
                 owner, mime, raw = _validated_image(data)
                 self.handle_image_upload(owner, mime, raw)
@@ -1459,6 +1489,498 @@ def validate_groq_models():
         LOGGER.warning('Groq model availability could not be verified; review configured models before use')
 
 
+# Public recording preparation. Only registered IDs enter this pipeline; audio,
+# signed URLs and provider diagnostics remain in a private temporary directory.
+LECTURE_MAX_BYTES = 128 * 1024 * 1024
+LECTURE_MAX_DURATION = 7200
+LECTURE_CHUNK_SECONDS = 600
+LECTURE_JOB_SECONDS = 1800
+LECTURE_CACHE_TTL = 86400
+LECTURE_CACHE_ENTRIES = 8
+
+
+class LectureSourceFailure(Exception):
+    def __init__(self, code='source_unavailable', retry=0):
+        self.code, self.retry = code, retry
+
+
+def _lecture_video(data, registered):
+    if (not isinstance(data, dict) or set(data) != {'videoId'}
+            or not isinstance(data['videoId'], str)
+            or not re.fullmatch(r'[A-Za-z0-9_-]{11}', data['videoId'])
+            or data['videoId'] not in registered):
+        raise ValueError('Invalid recording')
+    return data['videoId']
+
+
+def _lecture_registered(root):
+    try:
+        data = _parse_json((root / 'data/lectures.json').read_bytes())
+        return {row['videoId'] for row in data if isinstance(row, dict)
+                and isinstance(row.get('videoId'), str)
+                and re.fullmatch(r'[A-Za-z0-9_-]{11}', row['videoId'])}
+    except (OSError, ValueError, TypeError, KeyError):
+        return set()
+
+
+def _lecture_number(value):
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and math.isfinite(value)
+
+
+def _lecture_rows(data, offset, duration):
+    if (not isinstance(data, dict) or not _lecture_number(data.get('duration'))
+            or abs(data['duration'] - duration) > 2
+            or not isinstance(data.get('segments'), list) or len(data['segments']) > 2000):
+        raise LectureSourceFailure('transcription_invalid')
+    rows, previous, chars = [], 0, 0
+    for row in data['segments']:
+        if not isinstance(row, dict):
+            raise LectureSourceFailure('transcription_invalid')
+        start, end, text = row.get('start'), row.get('end'), row.get('text')
+        if (not _lecture_number(start) or not _lecture_number(end) or start < previous
+                or start < 0 or end <= start or end > duration + .1
+                or not isinstance(text, str) or len(text) > 16000
+                or any(ord(c) < 32 and c not in '\n\t' for c in text)):
+            raise LectureSourceFailure('transcription_invalid')
+        if not text.strip():
+            previous = min(end, duration)
+            continue  # Whisper emits real silence intervals with empty text.
+        chars += len(text)
+        if chars > 200000:
+            raise LectureSourceFailure('transcript_limit')
+        end = min(end, duration)
+        rows.append({'start': offset + start, 'end': offset + end,
+                     'duration': end-start, 'ar': text.strip()})
+        previous = end
+    return rows
+
+
+def _lecture_media_target(url):
+    try:
+        p = urllib.parse.urlsplit(url)
+        host = p.hostname or ''
+        if (p.scheme != 'https' or not host.endswith('.googlevideo.com')
+                or p.username or p.password or p.port not in (None, 443)
+                or p.fragment or any(ord(c) < 33 for c in url)):
+            raise ValueError
+        addresses = socket.getaddrinfo(host, 443, type=socket.SOCK_STREAM)
+        if not addresses or any(not ipaddress.ip_address(item[4][0]).is_global or ipaddress.ip_address(item[4][0]).is_multicast or ipaddress.ip_address(item[4][0]).is_reserved for item in addresses):
+            raise ValueError
+        return host, addresses[0][4][0], urllib.parse.urlunsplit(('', '', p.path or '/', p.query, ''))
+    except (ValueError, OSError, TypeError):
+        raise LectureSourceFailure('source_address_rejected') from None
+
+
+@__import__('contextlib').contextmanager
+def _lecture_open_media(url, deadline, byte_range=None):
+    # Resolve every redirect and pin its public address while retaining TLS SNI.
+    # No environment proxy and no remote URL is ever handed to ffmpeg.
+    import http.client
+    import ssl
+    for redirect in range(4):
+        host, address, target = _lecture_media_target(url)
+        class PinnedHTTPS(http.client.HTTPSConnection):
+            def connect(self):
+                raw = socket.create_connection((address, 443), self.timeout)
+                try:
+                    self.sock = self._context.wrap_socket(raw, server_hostname=host)
+                except BaseException:
+                    raw.close()
+                    raise
+        if time.monotonic() >= deadline:
+            raise LectureSourceFailure('source_timeout', 30)
+        connection = PinnedHTTPS(host, timeout=min(15, max(.1, deadline-time.monotonic())), context=ssl.create_default_context())
+        try:
+            headers = {'User-Agent':'Maqam/1.0', 'Accept-Encoding':'identity'}
+            if byte_range:
+                headers['Range'] = byte_range
+            connection.request('GET', target, headers=headers)
+            response = connection.getresponse()
+            if response.status in (301,302,303,307,308):
+                url = urllib.parse.urljoin(url, response.getheader('Location', ''))
+                if redirect == 3:
+                    raise LectureSourceFailure('source_redirect_limit')
+                continue
+            if response.status not in (200,206) or response.getheader('Content-Encoding', 'identity') != 'identity':
+                raise LectureSourceFailure('source_unavailable')
+            yield response
+            return
+        finally:
+            connection.close()
+
+
+LECTURE_NETWORK_WINDOW = 1024 * 1024
+
+class LectureMediaBridge:
+    """Private ranged transport; bounded upstream pieces avoid open-ended stalls."""
+    def __init__(self, url, deadline):
+        self.remote, self.deadline = url, deadline
+        self.transferred, self.requests, self.failure = 0, 0, None
+        self.lock = threading.Lock()
+        self.slots = threading.BoundedSemaphore(4)
+        self.path = '/' + uuid.uuid4().hex
+
+    def __enter__(self):
+        bridge = self
+        class Handler(BaseHTTPRequestHandler):
+            protocol_version = 'HTTP/1.0'
+            def log_message(self, *_):pass
+            def do_GET(self):
+                self.connection.settimeout(10)
+                if self.path != bridge.path or self.headers.get('Host') != '127.0.0.1:'+str(self.server.server_port):
+                    self.send_error(404);return
+                byte_range = self.headers.get('Range')
+                if byte_range and not re.fullmatch(r'bytes=[0-9]{1,12}-[0-9]{0,12}',byte_range):
+                    self.send_error(416);return
+                values = byte_range[6:].split('-') if byte_range else ['0','']
+                position = original_start = int(values[0])
+                requested_end = int(values[1]) if values[1] else None
+                if requested_end is not None and requested_end < position:
+                    self.send_error(416);return
+                if not bridge.slots.acquire(blocking=False):
+                    self.send_error(503);return
+                sent, total, desired_end = False, None, requested_end
+                try:
+                    while desired_end is None or position <= desired_end:
+                        upper = position + LECTURE_NETWORK_WINDOW - 1
+                        if desired_end is not None:upper = min(upper,desired_end)
+                        with bridge.lock:
+                            bridge.requests += 1
+                            if bridge.requests > 256 or time.monotonic() >= bridge.deadline:
+                                raise LectureSourceFailure('source_timeout',30)
+                        with _lecture_open_media(bridge.remote,bridge.deadline,f'bytes={position}-{upper}') as response:
+                            declared=response.getheader('Content-Length','')
+                            if not re.fullmatch(r'[0-9]{1,12}',declared) or not 0<int(declared)<=LECTURE_NETWORK_WINDOW:
+                                raise LectureSourceFailure('source_size_limit')
+                            if response.status == 206:
+                                match=re.fullmatch(r'bytes ([0-9]+)-([0-9]+)/([0-9]+)',response.getheader('Content-Range',''))
+                                if not match:raise LectureSourceFailure('source_incomplete')
+                                start,end,current_total=map(int,match.groups())
+                            elif response.status == 200 and position==0:
+                                start,end,current_total=0,int(declared)-1,int(declared)
+                            else:raise LectureSourceFailure('source_incomplete')
+                            if current_total>LECTURE_MAX_BYTES:raise LectureSourceFailure('source_size_limit')
+                            if (not 0<=start<=end<current_total or start!=position or end>upper
+                                    or end-start+1!=int(declared) or total is not None and total!=current_total):
+                                raise LectureSourceFailure('source_incomplete')
+                            total=current_total
+                            desired_end=min(requested_end,total-1) if requested_end is not None else total-1
+                            if not sent:
+                                self.send_response(206 if byte_range else 200)
+                                self.send_header('Content-Type','application/octet-stream')
+                                self.send_header('Content-Length',str(desired_end-original_start+1))
+                                self.send_header('Accept-Ranges','bytes')
+                                if byte_range:self.send_header('Content-Range',f'bytes {original_start}-{desired_end}/{total}')
+                                self.end_headers();sent=True
+                            count=0
+                            while count<int(declared):
+                                if time.monotonic()>=bridge.deadline:raise LectureSourceFailure('source_timeout',30)
+                                block=response.read1(min(65536,int(declared)-count))
+                                if not block:raise LectureSourceFailure('source_incomplete')
+                                with bridge.lock:
+                                    bridge.transferred+=len(block)
+                                    if bridge.transferred>LECTURE_MAX_BYTES:raise LectureSourceFailure('source_size_limit')
+                                count+=len(block)
+                                try:self.wfile.write(block)
+                                except (BrokenPipeError,ConnectionResetError,socket.timeout):return
+                            position=end+1
+                except (BrokenPipeError,ConnectionResetError):pass
+                except Exception as error:
+                    with bridge.lock:bridge.failure=error if isinstance(error,LectureSourceFailure) else LectureSourceFailure('source_unavailable',30)
+                    if not sent:
+                        try:self.send_error(502)
+                        except OSError:pass
+                finally:bridge.slots.release()
+        self.server=ThreadingHTTPServer(('127.0.0.1',0),Handler)
+        self.server.daemon_threads=True
+        self.url='http://127.0.0.1:'+str(self.server.server_port)+self.path
+        self.thread=threading.Thread(target=self.server.serve_forever,daemon=True,name='lecture-media-bridge')
+        self.thread.start();return self
+
+    def __exit__(self,*_):
+        self.server.shutdown();self.server.server_close();self.thread.join(2)
+
+
+def _lecture_process(args, directory, deadline, output_name, maximum=2*1024*1024):
+    import subprocess
+    path = directory / output_name
+    # No subprocess stderr is propagated, persisted or logged.
+    with path.open('wb') as output:
+        process = subprocess.Popen(args, stdin=subprocess.DEVNULL, stdout=output,
+            stderr=subprocess.DEVNULL, cwd=str(directory), shell=False,
+            creationflags=(subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP) if os.name == 'nt' else 0,
+            start_new_session=os.name != 'nt')
+        try:
+            while process.poll() is None:
+                if time.monotonic() >= deadline or path.stat().st_size > maximum:
+                    raise LectureSourceFailure('source_timeout', 30)
+                if sum(f.stat().st_size for f in directory.iterdir() if f.is_file()) > 192*1024*1024:
+                    raise LectureSourceFailure('source_size_limit')
+                time.sleep(.1)
+            if process.returncode or path.stat().st_size > maximum:
+                raise LectureSourceFailure('source_unavailable')
+        finally:
+            if process.poll() is None:
+                if os.name == 'nt':
+                    process.kill()
+                else:
+                    import signal
+                    os.killpg(process.pid, signal.SIGKILL)
+            process.wait(timeout=5)
+    return path
+
+
+def _lecture_multipart(audio):
+    if not audio or len(audio) > 25_000_000:
+        raise LectureSourceFailure('source_size_limit')
+    boundary = 'maqam' + uuid.uuid4().hex
+    pieces = []
+    for name, value in (('model','whisper-large-v3'),('language','ar'),('response_format','verbose_json'),('timestamp_granularities[]','segment')):
+        pieces.append(('--'+boundary+'\r\nContent-Disposition: form-data; name="'+name+'"\r\n\r\n'+value+'\r\n').encode())
+    pieces.extend([('--'+boundary+'\r\nContent-Disposition: form-data; name="file"; filename="chunk.mp3"\r\nContent-Type: audio/mpeg\r\n\r\n').encode(), audio, ('\r\n--'+boundary+'--\r\n').encode()])
+    return b''.join(pieces), 'multipart/form-data; boundary='+boundary
+
+
+def _lecture_transcribe(path, deadline):
+    key = _groq_key()
+    if not key:
+        raise LectureSourceFailure('groq_not_configured')
+    body, content_type = _lecture_multipart(path.read_bytes())
+    request = urllib.request.Request('https://api.groq.com/openai/v1/audio/transcriptions', data=body,
+        headers={'Authorization':'Bearer '+key, 'Content-Type':content_type, 'Accept':'application/json', 'User-Agent':'Maqam/1.0'}, method='POST')
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), RejectProviderRedirects())
+    for attempt in range(3):
+        if time.monotonic() >= deadline:
+            raise LectureSourceFailure('transcription_timeout', 30)
+        try:
+            with opener.open(request, timeout=min(60, max(.1, deadline-time.monotonic()))) as response:
+                if response.getcode() != 200:
+                    raise LectureSourceFailure('transcription_unavailable', 30)
+                blocks, size = [], 0
+                while True:
+                    if time.monotonic() >= deadline:
+                        raise LectureSourceFailure('transcription_timeout', 30)
+                    block = response.read1(min(65536, 2*1024*1024+1-size))
+                    if not block:
+                        break
+                    size += len(block)
+                    if size > 2*1024*1024:
+                        raise LectureSourceFailure('transcription_invalid')
+                    blocks.append(block)
+                return _parse_json(b''.join(blocks))
+        except urllib.error.HTTPError as error:
+            status = error.code
+            raw = error.headers.get('Retry-After','') if error.headers else ''
+            retry = min(60,max(1,int(raw))) if re.fullmatch(r'[0-9]{1,4}',raw) else 2**attempt
+            error.close()
+            if status != 429 and not 500 <= status <= 599:
+                raise LectureSourceFailure('transcription_rejected') from None
+            if attempt == 2 or retry > 4 or time.monotonic()+retry >= deadline:
+                raise LectureSourceFailure('transcription_rate_limited' if status == 429 else 'transcription_unavailable',retry) from None
+            time.sleep(retry)
+        except (OSError, ValueError, UnicodeError, urllib.error.URLError):
+            raise LectureSourceFailure('transcription_unavailable',30) from None
+
+
+def _lecture_prepare(video_id, progress):
+    import hashlib
+    import shutil
+    import sys
+    import tempfile
+    import imageio_ffmpeg
+    deadline = time.monotonic() + LECTURE_JOB_SECONDS
+    with tempfile.TemporaryDirectory(prefix='maqam-recording-') as name:
+        directory = Path(name)
+        progress('acquiring', 3)
+        args = [sys.executable,'-m','yt_dlp','--ignore-config','--no-playlist','--skip-download',
+            '--dump-single-json','--no-warnings','--quiet','--socket-timeout','15','--retries','1',
+            '--extractor-retries','1','--proxy','','--format','worstaudio[protocol=https]',
+            '--no-remote-components']
+        node = shutil.which('node')
+        if node:
+            args.extend(['--js-runtimes','node:'+node])
+        args.extend(['--','https://www.youtube.com/watch?v='+video_id])
+        metadata = _parse_json(_lecture_process(args,directory,min(deadline,time.monotonic()+90),'metadata.json').read_bytes())
+        duration = metadata.get('duration')
+        if metadata.get('id') != video_id or not _lecture_number(duration) or not 0 < duration <= LECTURE_MAX_DURATION or metadata.get('is_live'):
+            raise LectureSourceFailure('source_duration_limit')
+        if metadata.get('vcodec') != 'none' or metadata.get('acodec') in (None,'none'):
+            raise LectureSourceFailure('source_unavailable')
+        declared = metadata.get('filesize')
+        if declared is not None and (not _lecture_number(declared) or declared > LECTURE_MAX_BYTES):
+            raise LectureSourceFailure('source_size_limit')
+        digest = hashlib.sha256()
+        progress('transcoding', 15)
+        ffmpeg = imageio_ffmpeg.get_ffmpeg_exe()
+        # Stream the entire recording through our pinned, bounded transport.
+        # ffmpeg may seek using ranges but cannot access any external protocol.
+        with LectureMediaBridge(metadata.get('url'),deadline) as bridge:
+            try:
+                _lecture_process([ffmpeg,'-nostdin','-hide_banner','-loglevel','error','-threads','1',
+                    '-protocol_whitelist','http,tcp','-i',bridge.url,'-vn','-ac','1','-ar','16000',
+                    '-c:a','libmp3lame','-b:a','32k','-f','segment','-segment_time','600',
+                    '-segment_list',str(directory/'chunks.csv'),'-segment_list_type','csv','-reset_timestamps','1',
+                    str(directory/'chunk-%03d.mp3')],directory,min(deadline,time.monotonic()+300),'ffmpeg.log',65536)
+            except LectureSourceFailure:
+                if bridge.failure:
+                    raise bridge.failure
+                raise
+            if bridge.failure:
+                raise bridge.failure
+        import csv
+        with (directory/'chunks.csv').open(newline='',encoding='utf-8') as stream:
+            manifest = list(csv.reader(stream))
+        if not 1 <= len(manifest) <= 13:
+            raise LectureSourceFailure('source_duration_limit')
+        rows, covered = [], 0.0
+        for index, entry in enumerate(manifest):
+            if len(entry) != 3 or not re.fullmatch(r'chunk-[0-9]{3}\.mp3',entry[0]):
+                raise LectureSourceFailure('source_incomplete')
+            start, end = float(entry[1]),float(entry[2])
+            if not _lecture_number(start) or not _lecture_number(end) or abs(start-covered) > .1 or not 0 < end-start <= 601 or end > LECTURE_MAX_DURATION+1:
+                raise LectureSourceFailure('source_incomplete')
+            chunk = directory / entry[0]
+            if not 0 < chunk.stat().st_size < 25_000_000:
+                raise LectureSourceFailure('source_size_limit')
+            digest.update(chunk.read_bytes())
+            progress('transcribing',20+int(75*index/len(manifest)))
+            rows.extend(_lecture_rows(_lecture_transcribe(chunk,deadline),start,end-start))
+            if len(rows) > 2000 or sum(len(row['ar']) for row in rows) > 200000:
+                raise LectureSourceFailure('transcript_limit')
+            covered = end
+            chunk.unlink()
+        if abs(covered-duration) > 2 or not rows:
+            raise LectureSourceFailure('source_incomplete')
+        result = {'videoId':video_id,'alignmentVerified':True,'source':'whisper-large-v3',
+            'sourceSha256':digest.hexdigest(),'duration':duration,'transcriptReviewed':False,
+            'timing':'absolute','warning':'machine_transcript_not_reviewed',
+            'provenance':{'engine':'whisper-large-v3','kind':'machine-transcript','hashScope':'extracted-audio'},'segments':rows}
+        _lecture_validate_source(result,video_id)
+        return result
+
+
+def _lecture_validate_source(source, video):
+    if (not isinstance(source,dict) or source.get('videoId') != video or source.get('alignmentVerified') is not True
+            or source.get('source') != 'whisper-large-v3' or source.get('transcriptReviewed') is not False
+            or not isinstance(source.get('sourceSha256'),str) or not re.fullmatch('[0-9a-f]{64}',source['sourceSha256'])
+            or not _lecture_number(source.get('duration')) or not 0 < source['duration'] <= LECTURE_MAX_DURATION
+            or not isinstance(source.get('segments'),list) or not 1 <= len(source['segments']) <= 2000):
+        raise LectureSourceFailure('transcription_invalid')
+    rows = _lecture_rows({'duration':source['duration'],'segments':[{'start':r.get('start'),'end':r.get('end'),'text':r.get('ar')} if isinstance(r,dict) else r for r in source['segments']]},0,source['duration'])
+    if len(rows) != len(source['segments']) or any(not _lecture_number(a.get('duration')) or abs(a['duration']-b['duration']) > .01 for a,b in zip(source['segments'],rows)):
+        raise LectureSourceFailure('transcription_invalid')
+
+
+class LectureSourceJobs:
+    def __init__(self, registered, prepare=None, cache_dir=None, prepared_dir=None):
+        import hashlib
+        import tempfile
+        self.registered = registered
+        self.prepare = prepare or _lecture_prepare
+        self.lock = threading.RLock()
+        self.jobs = OrderedDict()
+        self.worker = None
+        self.cache_dir = Path(cache_dir) if cache_dir is not None else Path(tempfile.gettempdir()) / ('maqam-sources-'+hashlib.sha256(str(BASE_DIR).encode()).hexdigest()[:16])
+        self._restore()
+        if prepare is None:
+            self._seed_prepared(Path(prepared_dir) if prepared_dir is not None else BASE_DIR / 'prepared-recordings')
+
+    def _seed_prepared(self, directory):
+        # Actual precomputed public recordings avoid repeating ASR on every deploy.
+        # Files are never statically served and still undergo the full source schema.
+        existing = {entry['videoId'] for entry in self.jobs.values()}
+        for video in sorted(self.registered):
+            if video in existing or len(self.jobs) >= LECTURE_CACHE_ENTRIES:
+                continue
+            path = directory / (video + '.json')
+            try:
+                if path.stat().st_size > 2*1024*1024:
+                    continue
+                source = _parse_json(path.read_bytes())
+                _lecture_validate_source(source, video)
+                key = str(uuid.uuid4())
+                self.jobs[key] = {'jobId':key,'videoId':video,'status':'completed','stage':'completed','progress':100,'source':source,'_created':time.time()}
+            except (OSError,ValueError,TypeError,KeyError,LectureSourceFailure):
+                continue
+
+    def _restore(self):
+        try:
+            self.cache_dir.mkdir(mode=0o700,parents=True,exist_ok=True)
+            for path in sorted(self.cache_dir.glob('*.json'),key=lambda p:p.stat().st_mtime,reverse=True):
+                try:
+                    if path.stat().st_size > 2*1024*1024 or time.time()-path.stat().st_mtime > LECTURE_CACHE_TTL or len(self.jobs) >= LECTURE_CACHE_ENTRIES:
+                        path.unlink()
+                        continue
+                    entry = _parse_json(path.read_bytes())
+                    if entry['videoId'] not in self.registered or not _uuid_string(entry['jobId']) or entry['status'] != 'completed':
+                        raise ValueError
+                    _lecture_validate_source(entry['source'],entry['videoId'])
+                    entry['_created'] = path.stat().st_mtime
+                    self.jobs[entry['jobId']] = entry
+                except (OSError,ValueError,TypeError,KeyError,LectureSourceFailure):
+                    path.unlink(missing_ok=True)
+        except OSError:
+            pass  # In-memory operation remains valid on an ephemeral filesystem.
+
+    def _prune(self):
+        for key, job in list(self.jobs.items()):
+            if job['status'] in ('completed','failed') and time.time()-job['_created'] > LECTURE_CACHE_TTL:
+                self.jobs.pop(key)
+                try: (self.cache_dir/(key+'.json')).unlink(missing_ok=True)
+                except OSError: pass
+
+    def submit(self, video):
+        if video not in self.registered:
+            raise ValueError('Invalid recording')
+        with self.lock:
+            self._prune()
+            for key, job in self.jobs.items():
+                if job['videoId'] == video and job['status'] != 'failed':
+                    return self.snapshot(key)
+            if self.worker and self.worker.is_alive():
+                raise LectureSourceFailure('source_busy',30)
+            while len(self.jobs) >= LECTURE_CACHE_ENTRIES:
+                key, unused = self.jobs.popitem(last=False)
+                try: (self.cache_dir/(key+'.json')).unlink(missing_ok=True)
+                except OSError: pass
+            key = str(uuid.uuid4())
+            self.jobs[key] = {'jobId':key,'videoId':video,'status':'queued','stage':'queued','progress':0,'_created':time.time()}
+            self.worker = threading.Thread(target=self._run,args=(key,video),daemon=True,name='lecture-source-worker')
+            self.worker.start()
+            return self.snapshot(key)
+
+    def snapshot(self,key):
+        with self.lock:
+            self._prune()
+            job = self.jobs.get(key)
+            return {k:v for k,v in job.items() if not k.startswith('_')} if job else None
+
+    def _run(self,key,video):
+        def progress(stage, percent):
+            with self.lock:
+                self.jobs[key].update(status='processing',stage=stage,progress=percent)
+        try:
+            source = self.prepare(video,progress)
+            _lecture_validate_source(source,video)
+            with self.lock:
+                self.jobs[key].update(status='completed',stage='completed',progress=100,source=source)
+                value = self.snapshot(key)
+                try:
+                    path = self.cache_dir/(key+'.json')
+                    temporary = self.cache_dir/(key+'.tmp')
+                    temporary.write_text(json.dumps(value,ensure_ascii=False,allow_nan=False),encoding='utf-8')
+                    os.chmod(temporary,0o600)
+                    temporary.replace(path)
+                except OSError:
+                    pass
+        except Exception as error:
+            failure = error if isinstance(error,LectureSourceFailure) else LectureSourceFailure()
+            safe_codes = {'source_unavailable','source_address_rejected','source_redirect_limit','source_size_limit','source_duration_limit','source_timeout','source_incomplete','transcription_invalid','transcript_limit','groq_not_configured','transcription_timeout','transcription_unavailable','transcription_rejected','transcription_rate_limited'}
+            code = failure.code if failure.code in safe_codes else 'source_unavailable'
+            with self.lock:
+                self.jobs[key].update(status='failed',stage='failed',code=code,error='تعذر تجهيز تسجيل المحاضرة. يرجى المحاولة لاحقاً.',retryAfter=failure.retry)
+
+
 def create_server(host, port, base_dir=None):
     """Create one listener with no directory listing or implicit source serving."""
     root = Path(base_dir if base_dir is not None else BASE_DIR).resolve()
@@ -1478,7 +2000,9 @@ def create_server(host, port, base_dir=None):
     server.rate_limiter = RateLimiter()
     server.capability_limiter = RateLimiter()
     server.vision_state = VisionState()
-    server.groq_limiter = RateLimiter()
+    # Explicitly approved Edge-only streaming budget; other API limits stay intact.
+    server.groq_limiter = RateLimiter(120 if os.environ.get('TTS_PROVIDER','').strip().lower() == 'edge' else None)
+    server.lecture_sources = LectureSourceJobs(_lecture_registered(root))
     server.edge_speech = EdgeSpeechState()
     server.translation_state = TranslationState()
     server.translation_targets = _translation_targets()
