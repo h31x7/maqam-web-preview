@@ -1,7 +1,7 @@
 {
   "main": {
     "name": "Maqam-Source-20261020.zip",
-    "sha256": "5b536f5d70a720f017c75c8d9b2e07679e9a2bfca844bd8ad4c149f208efe22d"
+    "sha256": "a2e0ce8dcd6cbf3871c5e20850f46de32544f86bd355aaf5349e70a9eadebaf1"
   },
   "booksSha256": "8af60ff20a7658c5be058ab96a341ad4dfcd8e8e9d578168caf3c6b7eaa65dca",
   "parts": [
@@ -315,6 +315,8 @@
     "docs/screenshots/round5/before-notes-390-dark.png",
     "docs/screenshots/round5/before-notes-390-light.png",
     "docs/screenshots/round5/edge-translation-playback-desktop.png",
+    "docs/screenshots/video-dubbing/approved-wording-lecture.png",
+    "docs/screenshots/video-dubbing/approved-wording-notes.png",
     "docs/screenshots/video-dubbing/stop-control-live.png",
     "docs/screenshots/video-dubbing/stop-control-local.png",
     "docs/startup-performance.md",
@@ -325,6 +327,7 @@
     "docs/video-pipeline-review.md",
     "docs/video-source-probe.md",
     "docs/video-stop-deployment.md",
+    "docs/wording-removal-map.md",
     "launch_local.py",
     "maqamooo.html",
     "prepared-recordings/C5b3LdzYkEc.json",
@@ -387,6 +390,6 @@
     "assets/books/book-6.pdf",
     "assets/books/book-7.pdf"
   ],
-  "sourceCommit": "68ad15971bd54ba409b4a658fb8ba0e50663c0de",
-  "htmlSha256": "a52ba2ca6c8c5c2395384caccf69ab71283a320855f6f04c13ed9ad34e2820d8"
+  "sourceCommit": "201a453508139b528776351fe0120e8b8784e538",
+  "htmlSha256": "697b53d4c73e5575ed897df0e250d49285df38a39cf901674738f1e1b5fa3228"
 }
