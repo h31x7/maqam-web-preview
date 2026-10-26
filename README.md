@@ -1,5 +1,5 @@
-# Maqam — recording dubbing and dedicated stop control
+# Maqam catalog dubbing release
 
-Canonical source: 472685a873f05135fb651a1565ce09ec1a6b4609
+Source 68ad15971bd54ba409b4a658fb8ba0e50663c0de
 
-Actual registered recording -> Whisper timestamps -> lazy Qwen translation -> Edge speech with dedicated immediate stop. The73m15s first recording is bundled as explicitly unreviewed machine transcript. Other recordings prepare on demand. Archive and book checksums verified by python prepare_release.py. API secrets remain server-only. Validation/limitations: app/docs/video-dubbing-changelog.md.
+All seven actual public catalog recordings have validated, unreviewed machine transcripts bundled privately for translation/dubbing. Dedicated stop control retained. Six additional recording preparations and publication expressly approved. Original UI/server behavior unchanged. No secrets in release. Live unbounded stream preparation is not provided.

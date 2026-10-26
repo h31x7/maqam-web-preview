@@ -1,7 +1,7 @@
 {
   "main": {
     "name": "Maqam-Source-20261020.zip",
-    "sha256": "73df7cea64d53f057a13693aee37882e67e8ab61c18cda2b11640b982df9f08a"
+    "sha256": "5b536f5d70a720f017c75c8d9b2e07679e9a2bfca844bd8ad4c149f208efe22d"
   },
   "booksSha256": "8af60ff20a7658c5be058ab96a341ad4dfcd8e8e9d578168caf3c6b7eaa65dca",
   "parts": [
@@ -264,6 +264,9 @@
     "data/subtitles-unverified.json",
     "data/summaries.json",
     "docs/FONT-NOTICE.md",
+    "docs/catalog-preparation-plan.md",
+    "docs/catalog-transcripts.json",
+    "docs/catalog-transcripts.md",
     "docs/groq-connection-update.md",
     "docs/library-sources.md",
     "docs/round3-caption-evidence.json",
@@ -312,6 +315,8 @@
     "docs/screenshots/round5/before-notes-390-dark.png",
     "docs/screenshots/round5/before-notes-390-light.png",
     "docs/screenshots/round5/edge-translation-playback-desktop.png",
+    "docs/screenshots/video-dubbing/stop-control-live.png",
+    "docs/screenshots/video-dubbing/stop-control-local.png",
     "docs/startup-performance.md",
     "docs/superpowers/plans/2026-10-25-notes-chat-groq.md",
     "docs/superpowers/plans/2026-10-26-video-dubbing.md",
@@ -319,9 +324,16 @@
     "docs/video-pipeline-map.md",
     "docs/video-pipeline-review.md",
     "docs/video-source-probe.md",
+    "docs/video-stop-deployment.md",
     "launch_local.py",
     "maqamooo.html",
+    "prepared-recordings/C5b3LdzYkEc.json",
+    "prepared-recordings/LxunR94uQJ4.json",
+    "prepared-recordings/P9TetTCd0hY.json",
+    "prepared-recordings/_4X9iyHSzNk.json",
+    "prepared-recordings/a06RUwUDem0.json",
     "prepared-recordings/uJENBxFnDbU.json",
+    "prepared-recordings/whVWVKZeItI.json",
     "requirements.txt",
     "server.py",
     "tests/__init__.py",
@@ -375,6 +387,6 @@
     "assets/books/book-6.pdf",
     "assets/books/book-7.pdf"
   ],
-  "sourceCommit": "472685a873f05135fb651a1565ce09ec1a6b4609",
+  "sourceCommit": "68ad15971bd54ba409b4a658fb8ba0e50663c0de",
   "htmlSha256": "a52ba2ca6c8c5c2395384caccf69ab71283a320855f6f04c13ed9ad34e2820d8"
 }
