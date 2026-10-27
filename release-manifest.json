@@ -1,7 +1,7 @@
 {
   "main": {
     "name": "Maqam-Source-20261020.zip",
-    "sha256": "a229f3f4e214ebb59c3012ce1e3e20c63b3b3f0ecb60f1283de162ec1ab1cfe3"
+    "sha256": "fd423cd3c50ab7c94ffc3a99f9cd16c3255cd1de4ba307a843df5f6768162c7a"
   },
   "booksSha256": "8af60ff20a7658c5be058ab96a341ad4dfcd8e8e9d578168caf3c6b7eaa65dca",
   "parts": [
@@ -44,6 +44,8 @@
     "assets/brand/favicon-32.png",
     "assets/brand/maqam.png",
     "assets/brand/touch-icon.png",
+    "assets/media/testsample-f96d1ba67d98.jpg",
+    "assets/media/testsample-f96d1ba67d98.mp4",
     "assets/ocr/ara.traineddata.gz",
     "assets/pdfjs/LICENSE",
     "assets/pdfjs/cmaps/78-EUC-H.bcmap",
@@ -310,6 +312,8 @@
     "docs/screenshots/lesson-subtitles/entry-390-light.png",
     "docs/screenshots/lesson-subtitles/entry-768-dark.png",
     "docs/screenshots/lesson-subtitles/entry-768-light.png",
+    "docs/screenshots/lesson-subtitles/entry-live.png",
+    "docs/screenshots/lesson-subtitles/translation-live.png",
     "docs/screenshots/round5/after-home-1440-light.png",
     "docs/screenshots/round5/after-lecture-1440-dark.png",
     "docs/screenshots/round5/after-lecture-1440-light.png",
@@ -339,6 +343,7 @@
     "docs/startup-performance.md",
     "docs/superpowers/plans/2026-10-25-notes-chat-groq.md",
     "docs/superpowers/plans/2026-10-26-video-dubbing.md",
+    "docs/test-sample-lesson.md",
     "docs/video-dubbing-changelog.md",
     "docs/video-pipeline-map.md",
     "docs/video-pipeline-review.md",
@@ -385,6 +390,7 @@
     "tests/round4-vision.test.js",
     "tests/round5-media.test.js",
     "tests/round5-notes.test.js",
+    "tests/sample-lesson.test.js",
     "tests/startup-loading.test.js",
     "tests/test_lecture_source.py",
     "tests/test_round3_static.py",
@@ -407,6 +413,6 @@
     "assets/books/book-6.pdf",
     "assets/books/book-7.pdf"
   ],
-  "sourceCommit": "a6350fb3fb3557b2f32e61dca14f89abf837711a",
-  "htmlSha256": "15d4d15aafecad99378d9c6de078903508f1ddbc1c381344425927dba4a96d08"
+  "sourceCommit": "9c12fe0f56f826a0bf21ff33181e526b4dffb9e1",
+  "htmlSha256": "eb9a14525647d7a23febf53fdf53b7b39b8a317e31336ea9d9dab7ed7d22675b"
 }
