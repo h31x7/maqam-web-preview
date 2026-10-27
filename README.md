@@ -1,5 +1,3 @@
-# Maqam — test sample lesson release
+# Maqam — media and smart-note repair release
 
-Source commit: 9c12fe0f56f826a0bf21ff33181e526b4dffb9e1
-
-Adds the expressly authorized user video as the final lesson «عينة اختبار». Real native media and source poster; actual timed Whisper transcript for existing translation/dubbing; content-based summary, two-question quiz, and linked homework. Existing seven recording sources retained. 217 Node tests pass; RTL mobile/desktop light/dark browser verification. No server/environment/dependency changes. No secrets included.
+Source33d46a6. User-approved replacement65-second sample clip, actual timed transcript/poster and refreshed summary/quiz. Stable selected voice and tempo with pitch preservation, owned pause for overflowing speech, cancellation and Stop. Improved bounded local Arabic OCR preparation, layout/deskew and fallback. Reliable latest-note handoff with opening state.224 JS tests and14 Python image tests pass. Independent review resolved findings; actual local OCR and public Dify conversation verified. No server/environment/dependency edits or secrets. Existing seven recording sources retained.
