@@ -1,7 +1,7 @@
 {
   "main": {
     "name": "Maqam-Source-20261020.zip",
-    "sha256": "2c5a5e4912d34de78303be627eb35e23e77020ed0aef76ba09b419437c30755c"
+    "sha256": "a229f3f4e214ebb59c3012ce1e3e20c63b3b3f0ecb60f1283de162ec1ab1cfe3"
   },
   "booksSha256": "8af60ff20a7658c5be058ab96a341ad4dfcd8e8e9d578168caf3c6b7eaa65dca",
   "parts": [
@@ -269,6 +269,7 @@
     "docs/catalog-transcripts.json",
     "docs/catalog-transcripts.md",
     "docs/groq-connection-update.md",
+    "docs/lesson-subtitle-layout.md",
     "docs/library-sources.md",
     "docs/round3-caption-evidence.json",
     "docs/round3-changelog.md",
@@ -297,6 +298,18 @@
     "docs/round5-map.md",
     "docs/round5-notes-review.md",
     "docs/round5-release-readiness.md",
+    "docs/screenshots/lesson-subtitles/1440-dark.png",
+    "docs/screenshots/lesson-subtitles/1440-light.png",
+    "docs/screenshots/lesson-subtitles/390-dark.png",
+    "docs/screenshots/lesson-subtitles/390-light.png",
+    "docs/screenshots/lesson-subtitles/768-dark.png",
+    "docs/screenshots/lesson-subtitles/768-light.png",
+    "docs/screenshots/lesson-subtitles/entry-1440-dark.png",
+    "docs/screenshots/lesson-subtitles/entry-1440-light.png",
+    "docs/screenshots/lesson-subtitles/entry-390-dark.png",
+    "docs/screenshots/lesson-subtitles/entry-390-light.png",
+    "docs/screenshots/lesson-subtitles/entry-768-dark.png",
+    "docs/screenshots/lesson-subtitles/entry-768-light.png",
     "docs/screenshots/round5/after-home-1440-light.png",
     "docs/screenshots/round5/after-lecture-1440-dark.png",
     "docs/screenshots/round5/after-lecture-1440-light.png",
@@ -320,6 +333,7 @@
     "docs/screenshots/video-dubbing/approved-wording-live.png",
     "docs/screenshots/video-dubbing/approved-wording-notes.png",
     "docs/screenshots/video-dubbing/arabic-copy-entry.png",
+    "docs/screenshots/video-dubbing/arabic-copy-live.png",
     "docs/screenshots/video-dubbing/stop-control-live.png",
     "docs/screenshots/video-dubbing/stop-control-local.png",
     "docs/startup-performance.md",
@@ -393,6 +407,6 @@
     "assets/books/book-6.pdf",
     "assets/books/book-7.pdf"
   ],
-  "sourceCommit": "ca11039530940fdacc1488ec4e0ec89b54ab3cc5",
-  "htmlSha256": "a0cbc82fb7c701973125e5503870ce5a48853cd58f1ae4d296a32f217d51c493"
+  "sourceCommit": "a6350fb3fb3557b2f32e61dca14f89abf837711a",
+  "htmlSha256": "15d4d15aafecad99378d9c6de078903508f1ddbc1c381344425927dba4a96d08"
 }
