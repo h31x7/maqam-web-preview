@@ -1,3 +1,5 @@
-# Maqam — media and smart-note repair release
+# Maqam teaching feedback release
 
-Source33d46a6. User-approved replacement65-second sample clip, actual timed transcript/poster and refreshed summary/quiz. Stable selected voice and tempo with pitch preservation, owned pause for overflowing speech, cancellation and Stop. Improved bounded local Arabic OCR preparation, layout/deskew and fallback. Reliable latest-note handoff with opening state.224 JS tests and14 Python image tests pass. Independent review resolved findings; actual local OCR and public Dify conversation verified. No server/environment/dependency edits or secrets. Existing seven recording sources retained.
+Source c210899b34b329b4ef5b64154adb28746b5e6dc7
+
+Eight requested teaching/learning changes: removed employee dashboard, human-reviewed AI grading, audio quiz practice, twenty shared scholarly terms, five daily student sessions, review flashcards, once-only preparation points, and summary blanks. Existing design, media and provider environment preserved.261 JavaScript tests pass;127 Python tests pass with2 platform symlink skips. RTL desktop/mobile dark/light browser verified. No secrets, raw fonts, or new dependencies in release. See app/docs/teaching-feedback-changelog.md after extraction for verification and limitations.
